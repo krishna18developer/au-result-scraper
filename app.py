@@ -1,106 +1,208 @@
 import requests
 import json
+import pandas as pd
 from tabulate import tabulate
+import time
 
-def get_student_results(roll_no):
-    # API endpoint
-    url = f"https://api.campx.in/exams/student-results/external"
+# Define section patterns with batch years and entry types
+SECTION_PATTERNS = {
+    'CS-A': {
+        'regular': ['23EG109A', '22EG109A'],  # Current and detained
+        'lateral': ['24EG509A']  # Lateral entry
+    },
+    'CS-B': {
+        'regular': ['23EG109B', '22EG109B'],
+        'lateral': ['24EG509B']
+    },
+    'IT-A': {
+        'regular': ['23EG112A', '22EG112A'],
+        'lateral': ['24EG512A']
+    },
+    'IT-B': {
+        'regular': ['23EG112B', '22EG112B'],
+        'lateral': ['24EG512B']
+    },
+    'IT-C': {
+        'regular': ['23EG112C', '22EG112C'],
+        'lateral': ['24EG512C']
+    },
+    'IT-D': {
+        'regular': ['23EG112D', '22EG112D'],
+        'lateral': ['24EG512D']
+    },
+    'IT-E': {
+        'regular': ['23EG112E', '22EG112E'],
+        'lateral': ['24EG512E']
+    },
+    'IT-F': {
+        'regular': ['23EG112F', '22EG112F'],
+        'lateral': ['24EG512F']
+    }
+}
+
+def generate_roll_numbers(patterns, start, end, include_detained=False, include_lateral=False):
+    """Generate roll numbers for given patterns and range"""
+    roll_numbers = []
     
-    # Parameters
+    # Regular current batch
+    roll_numbers.extend([f"{patterns['regular'][0]}{num:02d}" for num in range(start, end + 1)])
+    
+    # Detained students from previous batch
+    if include_detained:
+        roll_numbers.extend([f"{patterns['regular'][1]}{num:02d}" for num in range(start, end + 1)])
+    
+    # Lateral entry students
+    if include_lateral:
+        roll_numbers.extend([f"{patterns['lateral'][0]}{num:02d}" for num in range(start, end + 1)])
+    
+    return roll_numbers
+
+def get_student_results(roll_no, selected_sems):
+    """Fetch results for a single student"""
+    url = "https://api.campx.in/exams/student-results/external"
+    
     params = {
         "examType": "general",
         "rollNo": roll_no
     }
     
-    # Updated headers based on the cURL request
     headers = {
         "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36 Edg/131.0.0.0",
         "Accept": "application/json, text/plain, */*",
         "Accept-Language": "en-US,en;q=0.9",
-        "Origin": "https://aupulse.campx.in",  # Changed from results.campx.in
-        "Referer": "https://aupulse.campx.in/",  # Changed from results.campx.in
+        "Origin": "https://aupulse.campx.in",
+        "Referer": "https://aupulse.campx.in/",
         "sec-ch-ua": '"Microsoft Edge";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
         "sec-ch-ua-mobile": "?0",
         "sec-ch-ua-platform": '"macOS"',
         "sec-fetch-dest": "empty",
         "sec-fetch-mode": "cors",
         "sec-fetch-site": "same-site",
-        "x-api-version": "2",  # Added this important header
-        "x-institution-code": "aupulse",  # Added this important header
-        "x-tenant-id": "aupulse"  # Changed from srkrec to aupulse
+        "x-api-version": "2",
+        "x-institution-code": "aupulse",
+        "x-tenant-id": "aupulse"
     }
 
     try:
-        # Make the request with a session to handle cookies
         session = requests.Session()
-        
-        # Set the cookie from the cURL request
         cookies = {
             "_clck": "1qn1ema|2|fm8|0|1492"
         }
         session.cookies.update(cookies)
         
-        # Make the main request
         response = session.get(url, params=params, headers=headers)
         
         if response.status_code == 422:
-            print("Error: Unable to get tenant details. This might be because:")
-            print("1. The roll number format is incorrect")
-            print("2. The institution code or tenant ID might be incorrect")
-            print(f"Response content: {response.text}")
-            return
+            print(f"Error fetching results for {roll_no}: {response.text}")
+            return None
             
         response.raise_for_status()
-        
-        # Parse the JSON response
         data = response.json()
         
-        # Extract and display student info
-        student = data["student"]
-        print(f"\nStudent Name: {student['fullName']}")
-        print(f"Roll Number: {student['rollNo']}\n")
+        student_results = []
+        student_info = data["student"]
+        student_name = student_info["fullName"]
         
-        # Process results semester-wise
+        # Add batch year from roll number
+        batch_year = "20" + roll_no[:2]
+        entry_type = "Lateral" if "509" in roll_no else "Regular"
+        
         for semester in data["results"]:
-            sem_no = semester["semNo"]
-            print(f"\nSemester {sem_no} Results:")
-            print("-" * 80)
-            
-            # Prepare results table
-            results_table = []
+            if semester["semNo"] not in selected_sems:
+                continue
+                
             for subject in semester["subjectsResults"]:
                 subject_info = subject["subject"]
                 grade_info = subject["consideredGrade"]
                 
-                results_table.append([
-                    subject_info["subjectCode"],
-                    subject_info["name"],
-                    subject_info["credits"],
-                    grade_info["grade"],
-                    grade_info["gradePoints"],
-                    "Pass" if grade_info["passed"] else "Fail"
-                ])
-            
-            # Display results in tabular format
-            table_headers = ["Subject Code", "Subject Name", "Credits", "Grade", "Grade Points", "Status"]
-            print(tabulate(results_table, headers=table_headers, tablefmt="grid"))
-            
-            # Display SGPA if available
-            if semester["sgpa"]:
-                print(f"\nSGPA: {semester['sgpa']}")
-            if semester["cgpa"]:
-                print(f"CGPA: {semester['cgpa']}")
+                result = {
+                    "Roll No": roll_no,
+                    "Name": student_name,
+                    "Batch": batch_year,
+                    "Entry Type": entry_type,
+                    "Semester": semester["semNo"],
+                    "Subject Code": subject_info["subjectCode"],
+                    "Subject Name": subject_info["name"],
+                    "Credits": subject_info["credits"],
+                    "Grade": grade_info["grade"],
+                    "Grade Points": grade_info["gradePoints"],
+                    "Status": "Pass" if grade_info["passed"] else "Fail"
+                }
+                student_results.append(result)
+        
+        return student_results
 
-    except requests.exceptions.RequestException as e:
-        print(f"Error fetching results: {e}")
-        print(f"Response content: {response.text if 'response' in locals() else 'No response'}")
-    except json.JSONDecodeError:
-        print("Error parsing response data")
-        print(f"Response content: {response.text if 'response' in locals() else 'No response'}")
-    except KeyError as e:
-        print(f"Error accessing data: {e}")
-        print(f"Available keys: {data.keys() if 'data' in locals() else 'No data'}")
+    except Exception as e:
+        print(f"Error processing {roll_no}: {str(e)}")
+        return None
+
+def main():
+    print("Available Sections:")
+    for section in SECTION_PATTERNS.keys():
+        print(f"Section {section}")
+    
+    section = input("\nEnter section (A/B/C/D): ").upper()
+    if section not in SECTION_PATTERNS:
+        print("Invalid section!")
+        return
+    
+    include_detained = input("Include detained students? (y/n): ").lower() == 'y'
+    include_lateral = input("Include lateral entry students? (y/n): ").lower() == 'y'
+        
+    start_num = int(input("Enter starting roll number (1-99): "))
+    end_num = int(input("Enter ending roll number (1-99): "))
+    
+    print("\nEnter semester numbers to fetch (comma-separated)")
+    print("Example: 1,2,3")
+    sems_input = input("Semesters: ")
+    selected_sems = [int(sem.strip()) for sem in sems_input.split(",")]
+    
+    roll_numbers = generate_roll_numbers(
+        SECTION_PATTERNS[section], 
+        start_num, 
+        end_num,
+        include_detained,
+        include_lateral
+    )
+    
+    all_results = []
+    total_rolls = len(roll_numbers)
+    
+    print(f"\nFetching results for {total_rolls} students...")
+    for i, roll_no in enumerate(roll_numbers, 1):
+        print(f"Processing {roll_no} ({i}/{total_rolls})...")
+        results = get_student_results(roll_no, selected_sems)
+        if results:
+            all_results.extend(results)
+        time.sleep(1)  # Add delay to avoid overwhelming the server
+    
+    if all_results:
+        # Convert to DataFrame and save to CSV
+        df = pd.DataFrame(all_results)
+        
+        # Create filename with included types
+        types = []
+        if include_detained:
+            types.append("detained")
+        if include_lateral:
+            types.append("lateral")
+        type_str = "_with_" + "_".join(types) if types else ""
+        
+        filename = f"section_{section}{type_str}_sem_{'-'.join(map(str, selected_sems))}_results.csv"
+        df.to_csv(filename, index=False)
+        print(f"\nResults exported to {filename}")
+        
+        # Display summary
+        print("\nSummary:")
+        print(f"Total students processed: {total_rolls}")
+        print(f"Total records exported: {len(all_results)}")
+        
+        # Display batch-wise summary
+        batch_summary = df.groupby(['Batch', 'Entry Type'])['Roll No'].nunique()
+        print("\nBatch-wise Summary:")
+        print(batch_summary)
+    else:
+        print("No results were fetched!")
 
 if __name__ == "__main__":
-    roll_no = input("Enter your roll number: ")
-    get_student_results(roll_no)
+    main()

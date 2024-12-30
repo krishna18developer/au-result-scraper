@@ -4,6 +4,10 @@ import pandas as pd
 from tabulate import tabulate
 import time
 from concurrent.futures import ThreadPoolExecutor
+import os
+
+# Create data directory if it doesn't exist
+os.makedirs('data', exist_ok=True)
 
 # Define section patterns with batch years and entry types
 SECTION_PATTERNS = {
@@ -235,10 +239,6 @@ def main():
     print(f"\nFound {len(roll_numbers)} valid roll numbers")
     print("Roll numbers found:", roll_numbers)
     
-    proceed = input("\nProceed with fetching results? (y/n): ").lower() == 'y'
-    if not proceed:
-        return
-    
     all_results = []
     total_rolls = len(roll_numbers)
     
@@ -261,6 +261,7 @@ def main():
         df = df.drop('EntryTypeOrder', axis=1)
         
         # Create filename
+        sem_str = '-'.join(map(str, selected_sems))
         types = []
         if include_detained:
             types.append("rejoin")
@@ -268,9 +269,10 @@ def main():
             types.append("lateral")
         type_str = "_with_" + "_".join(types) if types else ""
         
-        filename = f"section_{section}{type_str}_sem_{'-'.join(map(str, selected_sems))}_results.csv"
-        df.to_csv(filename, index=False)
-        print(f"\nResults exported to {filename}")
+        filename = f"{section}_sem{sem_str}{type_str}.csv"
+        filepath = os.path.join('data', filename)
+        df.to_csv(filepath, index=False)
+        print(f"\nResults exported to {filepath}")
         
         # Display summary
         print("\nSummary:")

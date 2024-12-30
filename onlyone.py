@@ -5,7 +5,15 @@ from tabulate import tabulate
 def get_student_results(roll_no):
     # API endpoint
     url = f"https://api.campx.in/exams/student-results/external"
-    
+    url_ip = "http://15.206.85.27/exams/student-results/external"
+    print("1. Use api.campx.in for production")
+    print("2. Use 15.206.85.27 (exposed ip) for testing")
+    print("Enter 1 or 2:")
+    choice = input()
+    if choice == "1":
+        url = url
+    else:
+        url = url_ip
     # Parameters
     params = {
         "examType": "general",

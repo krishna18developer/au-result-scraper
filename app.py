@@ -242,10 +242,14 @@ def get_student_results(roll_no, selected_sems):
             student_result_detailed[f"Sem {sem_no} SGPA"] = sgpa
             student_result_simple[f"Sem {sem_no} SGPA"] = sgpa
 
-        if "cgpa" in student_info:
-            student_result_detailed["CGPA"] = student_info["cgpa"]
-            student_result_simple["CGPA"] = student_info["cgpa"]
-        
+        # if "cgpa" in student_info:
+        #     student_result_detailed["CGPA"] = student_info["cgpa"]
+        #     student_result_simple["CGPA"] = student_info["cgpa"]
+
+        cgpa = data["results"][len(data["results"]) - 1]["cgpa"]
+        student_result_detailed["CGPA"] = cgpa
+        student_result_simple["CGPA"] = cgpa
+
         # Process each semester's subjects
         for semester in data["results"]:
             if semester["semNo"] not in selected_sems:

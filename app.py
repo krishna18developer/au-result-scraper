@@ -108,7 +108,7 @@ def generate_roll_numbers(patterns, include_detained=False, include_lateral=Fals
             valid_rolls.append(result['roll'])
         elif result['status'] == 404:
             print(f"Stopped at {roll} after encountering a 404 error")
-            break
+            continue
         time.sleep(0.2)  # Small delay between requests
     
     # Test lateral entry rolls (test all)
@@ -310,68 +310,98 @@ def main():
     print("Available Sections:")
     for section in SECTION_PATTERNS.keys():
         print(f"Section {section}")
-    
+
     section = input("\nEnter section (e.g., CS-A, IT-B): ")
     if section not in SECTION_PATTERNS:
         print("Invalid section!")
         return
-    
-    # Ask for mode
-    print("\nChoose mode:")
-    print("1. Automated (Check all possible roll numbers)")
-    print("2. Manual (Input specific roll numbers)")
-    mode = input("Enter mode (1/2): ").strip()
-    
-    include_detained = input("Include detained students? (y/n): ").lower() == 'y'
-    include_lateral = input("Include lateral entry students? (y/n): ").lower() == 'y'
-    include_custom = input("Include any other roll numbers? (y/n): ").lower() == 'y'
-    
-    if mode == "1":
-        # Automated mode
-        roll_numbers = generate_roll_numbers(
-            SECTION_PATTERNS[section],
-            include_detained,
-            include_lateral
-        )
-    else:
-        # Manual mode
-        manual_rolls = get_manual_roll_numbers(include_custom) if (include_detained or include_lateral or include_custom) else []
-        
-        # Generate regular roll numbers (1-80)
-        regular_prefix = SECTION_PATTERNS[section]['regular'][0]  # Current batch prefix
-        regular_rolls = [f"{regular_prefix}{num:02d}" for num in range(1, 81)]
-        
-        # Combine and sort roll numbers
-        roll_numbers = manual_rolls + regular_rolls
-        
-        # Sort rolls to maintain rejoin -> regular -> lateral -> custom order
-        def get_roll_type_order(roll):
-            if '22EG' in roll:  # Rejoin/Detained
-                return 0
-            elif '24EG5' in roll:  # Lateral
-                return 2
-            elif roll.startswith('23EG'):  # Regular
-                return 1
-            return 3  # Custom/Other
-        
-        roll_numbers.sort(key=get_roll_type_order)
-    
+
+    print("\nFor each student type, choose how you want to input data:")
+    print("1. Automated (generate and validate roll numbers)")
+    print("2. Manual (enter specific roll numbers)")
+
+    # Regular
+    mode_regular = input("\nRegular Students - Choose mode (1-Auto / 2-Manual / any other key to skip): ").strip()
+    regular_rolls = []
+    if mode_regular == "1":
+        regular_prefix = SECTION_PATTERNS[section]['regular'][0]
+        regular_rolls = []
+        for num in range(1, 101):
+            roll = f"{regular_prefix}{num:02d}"
+            result = test_roll_number(roll)
+            if result['status'] == 200:
+                regular_rolls.append(roll)
+            else:
+                print(f"Skipping {roll} due to status {result['status']}")
+            time.sleep(0.2)
+    elif mode_regular == "2":
+        print("Enter regular roll numbers (comma-separated or one per line, press Enter twice to finish):")
+        while True:
+            entry = input().strip()
+            if not entry:
+                break
+            regular_rolls += [r.strip() for r in entry.split(',') if r.strip()]
+
+    # Detained
+    mode_detained = input("\nDetained Students - Choose mode (1-Auto / 2-Manual / skip): ").strip()
+    detained_rolls = []
+    if mode_detained == "1":
+        detained_prefix = SECTION_PATTERNS[section]['regular'][1]
+        detained_rolls = [f"{detained_prefix}{num:02d}" for num in range(1, 101)]
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(test_roll_number, detained_rolls))
+            detained_rolls = [r['roll'] for r in results if r['status'] == 200]
+    elif mode_detained == "2":
+        print("Enter detained roll numbers (comma-separated or one per line, press Enter twice to finish):")
+        while True:
+            entry = input().strip()
+            if not entry:
+                break
+            detained_rolls += [r.strip() for r in entry.split(',') if r.strip()]
+
+    # Lateral
+    mode_lateral = input("\nLateral Entry Students - Choose mode (1-Auto / 2-Manual / skip): ").strip()
+    lateral_rolls = []
+    if mode_lateral == "1":
+        lateral_prefix = SECTION_PATTERNS[section]['lateral'][0]
+        lateral_rolls = [f"{lateral_prefix}{num:02d}" for num in range(1, 101)]
+        with ThreadPoolExecutor(max_workers=5) as executor:
+            results = list(executor.map(test_roll_number, lateral_rolls))
+            lateral_rolls = [r['roll'] for r in results if r['status'] == 200]
+    elif mode_lateral == "2":
+        print("Enter lateral roll numbers (comma-separated or one per line, press Enter twice to finish):")
+        while True:
+            entry = input().strip()
+            if not entry:
+                break
+            lateral_rolls += [r.strip() for r in entry.split(',') if r.strip()]
+
+    # Combine and sort
+    roll_numbers = detained_rolls + regular_rolls + lateral_rolls
+
+    def get_roll_type_order(roll):
+        if '22EG' in roll: return 0
+        elif '24EG5' in roll: return 2
+        return 1
+
+    roll_numbers.sort(key=get_roll_type_order)
+
     if not roll_numbers:
-        print("No valid roll numbers found!")
+        print("No roll numbers to process.")
         return
-    
+
     print(f"\nFound {len(roll_numbers)} roll numbers")
     print("Roll numbers:", roll_numbers)
-    
+
     print("\nEnter semester numbers to fetch (comma-separated)")
     print("Example: 1,2,3")
     sems_input = input("Semesters: ")
     selected_sems = [int(sem.strip()) for sem in sems_input.split(",")]
-    
+
     detailed_results = []
     simple_results = []
     total_rolls = len(roll_numbers)
-    
+
     print(f"\nFetching results for {total_rolls} students...")
     for i, roll_no in enumerate(roll_numbers, 1):
         print(f"Processing {roll_no} ({i}/{total_rolls})...")
@@ -379,60 +409,30 @@ def main():
         if result and isinstance(result, dict) and 'detailed' in result and 'simple' in result:
             detailed_results.append(result['detailed'])
             simple_results.append(result['simple'])
-        time.sleep(1)  # Add delay to avoid overwhelming the server
-    
+        time.sleep(1)
+
     if detailed_results and simple_results:
-        # Convert to DataFrames
         df_detailed = pd.DataFrame(detailed_results)
         df_simple = pd.DataFrame(simple_results)
-        
-        # Sort DataFrames by Entry Type in desired order
+
         entry_type_order = {'Rejoin': 0, 'Regular': 1, 'Lateral': 2}
         for df in [df_detailed, df_simple]:
             df['EntryTypeOrder'] = df['Entry Type'].map(entry_type_order)
             df.sort_values(['EntryTypeOrder', 'Roll No'], inplace=True)
             df.drop('EntryTypeOrder', axis=1, inplace=True)
-        
-        # Create base filename
+
         sem_str = '-'.join(map(str, selected_sems))
-        types = []
-        if include_detained:
-            types.append("rejoin")
-        if include_lateral:
-            types.append("lateral")
-        type_str = "_with_" + "_".join(types) if types else ""
-        base_filename = f"{section}_sem{sem_str}{type_str}"
-        
-        # Save detailed CSV
+        base_filename = f"{section}_sem{sem_str}"
         detailed_filepath = os.path.join('data', f"{base_filename}_detailed.csv")
-        df_detailed.to_csv(detailed_filepath, index=False)
-        
-        # Save simple CSV
         simple_filepath = os.path.join('data', f"{base_filename}_simple.csv")
+        df_detailed.to_csv(detailed_filepath, index=False)
         df_simple.to_csv(simple_filepath, index=False)
-        
+
         print(f"\nResults exported to:")
         print(f"Detailed results: {detailed_filepath}")
         print(f"Simple results: {simple_filepath}")
-        
-        # Display summary
-        print("\nSummary:")
-        print(f"Total students processed: {total_rolls}")
-        print(f"Total unique students: {len(df_detailed)}")
-        
-        # Display batch-wise and entry-type summary
-        batch_summary = df_detailed.groupby(['Batch', 'Entry Type'])['Roll No'].nunique().sort_index()
-        print("\nBatch-wise Summary:")
-        print(batch_summary)
-        
-        # Display entry-type summary
-        entry_summary = df_detailed.groupby('Entry Type')['Roll No'].nunique()
-        print("\nEntry Type Summary:")
-        for entry_type in ['Rejoin', 'Regular', 'Lateral']:
-            if entry_type in entry_summary:
-                print(f"{entry_type}: {entry_summary[entry_type]} students")
     else:
         print("No results were fetched!")
-
+        
 if __name__ == "__main__":
     main()

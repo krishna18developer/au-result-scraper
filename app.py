@@ -236,6 +236,15 @@ def get_student_results(roll_no, selected_sems):
         }
         
         student_result_simple = student_result_detailed.copy()
+# Add SGPA and CGPA if available
+        sgpa_map = {sem["semNo"]: sem.get("sgpa") for sem in data["results"] if "sgpa" in sem}
+        for sem_no, sgpa in sgpa_map.items():
+            student_result_detailed[f"Sem {sem_no} SGPA"] = sgpa
+            student_result_simple[f"Sem {sem_no} SGPA"] = sgpa
+
+        if "cgpa" in student_info:
+            student_result_detailed["CGPA"] = student_info["cgpa"]
+            student_result_simple["CGPA"] = student_info["cgpa"]
         
         # Process each semester's subjects
         for semester in data["results"]:

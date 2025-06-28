@@ -1,0 +1,66 @@
+{
+    "CS-A": {
+        "regular": [
+            "EG109A"
+        ],
+        "lateral": [
+            "EG509A"
+        ]
+    },
+    "CS-B": {
+        "regular": [
+            "EG109B"
+        ],
+        "lateral": [
+            "EG509B"
+        ]
+    },
+    "IT-A": {
+        "regular": [
+            "EG112A"
+        ],
+        "lateral": [
+            "EG512A"
+        ]
+    },
+    "IT-B": {
+        "regular": [
+            "EG112B"
+        ],
+        "lateral": [
+            "EG512B"
+        ]
+    },
+    "IT-C": {
+        "regular": [
+            "EG112C"
+        ],
+        "lateral": [
+            "EG512C"
+        ]
+    },
+    "IT-D": {
+        "regular": [
+            "EG112D"
+        ],
+        "lateral": [
+            "EG512D"
+        ]
+    },
+    "IT-E": {
+        "regular": [
+            "EG112E"
+        ],
+        "lateral": [
+            "EG512E"
+        ]
+    },
+    "IT-F": {
+        "regular": [
+            "EG112F"
+        ],
+        "lateral": [
+            "EG512F"
+        ]
+    }
+}

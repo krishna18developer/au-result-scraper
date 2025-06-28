@@ -9,41 +9,9 @@ import os
 # Create data directory if it doesn't exist
 os.makedirs('data', exist_ok=True)
 
-# Define section patterns with batch years and entry types
-SECTION_PATTERNS = {
-    'CS-A': {
-        'regular': ['23EG109A', '22EG109A'],  # Current and detained
-        'lateral': ['24EG509A']  # Lateral entry
-    },
-    'CS-B': {
-        'regular': ['23EG109B', '22EG109B'],
-        'lateral': ['24EG509B']
-    },
-    'IT-A': {
-        'regular': ['23EG112A', '22EG112A'],
-        'lateral': ['24EG512A']
-    },
-    'IT-B': {
-        'regular': ['23EG112B', '22EG112B'],
-        'lateral': ['24EG512B']
-    },
-    'IT-C': {
-        'regular': ['23EG112C', '22EG112C'],
-        'lateral': ['24EG512C']
-    },
-    'IT-D': {
-        'regular': ['23EG112D', '22EG112D'],
-        'lateral': ['24EG512D']
-    },
-    'IT-E': {
-        'regular': ['23EG112E', '22EG112E'],
-        'lateral': ['24EG512E']
-    },
-    'IT-F': {
-        'regular': ['23EG112F', '22EG112F'],
-        'lateral': ['24EG512F']
-    }
-}
+# Load section patterns from JSON file
+with open("section_patterns.json", "r") as f:
+    BASE_SECTION_PATTERNS = json.load(f)
 
 def test_roll_number(roll_no):
     """Test if a roll number exists by making a request"""
@@ -170,7 +138,7 @@ def determine_student_status(data):
     
     return "Regular"
 
-def get_student_results(roll_no, selected_sems):
+def get_student_results(roll_no, selected_sems, fetch_sgpa):
     """Fetch results for a single student"""
     url = "https://api.campx.in/exams/student-results/external"
     
@@ -237,17 +205,24 @@ def get_student_results(roll_no, selected_sems):
         
         student_result_simple = student_result_detailed.copy()
 # Add SGPA and CGPA if available
-        sgpa_map = {sem["semNo"]: sem.get("sgpa") for sem in data["results"] if "sgpa" in sem}
-        for sem_no, sgpa in sgpa_map.items():
-            student_result_detailed[f"Sem {sem_no} SGPA"] = sgpa
-            student_result_simple[f"Sem {sem_no} SGPA"] = sgpa
-
-        # if "cgpa" in student_info:
-        #     student_result_detailed["CGPA"] = student_info["cgpa"]
-        #     student_result_simple["CGPA"] = student_info["cgpa"]
-
+        if fetch_sgpa:
+            sgpa_map = {sem["semNo"]: sem.get("sgpa") for sem in data["results"] if "sgpa" in sem}
+            for sem_no, sgpa in sgpa_map.items():
+                student_result_detailed[f"Sem {sem_no} SGPA"] = sgpa
+                student_result_simple[f"Sem {sem_no} SGPA"] = sgpa
+        
         cgpa = data["results"][len(data["results"]) - 1]["cgpa"]
         student_result_detailed["CGPA"] = cgpa
+        # Count number of backlogs across all semesters
+        backlog_count = 0
+        for semester in data["results"]:
+            for subject in semester.get("subjectsResults", []):
+                grade_info = subject.get("consideredGrade", {})
+                if not grade_info.get("passed", True):
+                    backlog_count += 1
+        student_result_detailed["Backlogs"] = backlog_count
+        student_result_simple["Backlogs"] = backlog_count
+
         student_result_simple["CGPA"] = cgpa
 
         # Process each semester's subjects
@@ -321,11 +296,24 @@ def get_manual_roll_numbers(include_custom=False):
 
 def main():
     print("Available Sections:")
-    for section in SECTION_PATTERNS.keys():
+    for section in BASE_SECTION_PATTERNS.keys():
         print(f"Section {section}")
 
     section = input("\nEnter section (e.g., CS-A, IT-B): ")
-    if section not in SECTION_PATTERNS:
+    joined_year = input("Enter joined year (e.g., 2023): ").strip()
+    if not joined_year.isdigit() or len(joined_year) != 4:
+        print("Invalid year!")
+        return
+    year_suffix = joined_year[2:]
+    previous_year_suffix = str(int(year_suffix) - 1)
+    next_year_suffix = str(int(year_suffix) + 1)
+    section_patterns = {
+        'regular': [f"{year_suffix}" + BASE_SECTION_PATTERNS[section]['regular'][0],
+                    str(int(year_suffix)-1) + BASE_SECTION_PATTERNS[section]['regular'][0]],
+        'lateral': [f"{next_year_suffix}" + BASE_SECTION_PATTERNS[section]['lateral'][0]]
+    }
+
+    if section not in BASE_SECTION_PATTERNS:
         print("Invalid section!")
         return
 
@@ -337,7 +325,7 @@ def main():
     mode_regular = input("\nRegular Students - Choose mode (1-Auto / 2-Manual / any other key to skip): ").strip()
     regular_rolls = []
     if mode_regular == "1":
-        regular_prefix = SECTION_PATTERNS[section]['regular'][0]
+        regular_prefix = section_patterns['regular'][0]
         regular_rolls = []
         for num in range(1, 101):
             roll = f"{regular_prefix}{num:02d}"
@@ -359,7 +347,7 @@ def main():
     mode_detained = input("\nDetained Students - Choose mode (1-Auto / 2-Manual / skip): ").strip()
     detained_rolls = []
     if mode_detained == "1":
-        detained_prefix = SECTION_PATTERNS[section]['regular'][1]
+        detained_prefix = section_patterns['regular'][1]
         detained_rolls = [f"{detained_prefix}{num:02d}" for num in range(1, 101)]
         with ThreadPoolExecutor(max_workers=5) as executor:
             results = list(executor.map(test_roll_number, detained_rolls))
@@ -376,7 +364,7 @@ def main():
     mode_lateral = input("\nLateral Entry Students - Choose mode (1-Auto / 2-Manual / skip): ").strip()
     lateral_rolls = []
     if mode_lateral == "1":
-        lateral_prefix = SECTION_PATTERNS[section]['lateral'][0]
+        lateral_prefix = section_patterns['lateral'][0]
         lateral_rolls = [f"{lateral_prefix}{num:02d}" for num in range(1, 101)]
         with ThreadPoolExecutor(max_workers=5) as executor:
             results = list(executor.map(test_roll_number, lateral_rolls))
@@ -393,8 +381,10 @@ def main():
     roll_numbers = detained_rolls + regular_rolls + lateral_rolls
 
     def get_roll_type_order(roll):
-        if '22EG' in roll: return 0
-        elif '24EG5' in roll: return 2
+        if roll[0:2] == previous_year_suffix:
+            return 0
+        elif roll[0:2] == next_year_suffix:
+            return 2
         return 1
 
     roll_numbers.sort(key=get_roll_type_order)
@@ -405,6 +395,9 @@ def main():
 
     print(f"\nFound {len(roll_numbers)} roll numbers")
     print("Roll numbers:", roll_numbers)
+
+    print("\nFetch SGPA for each semester? (y/n): ", end="")
+    fetch_sgpa = input().strip().lower() == 'y'
 
     print("\nEnter semester numbers to fetch (comma-separated)")
     print("Example: 1,2,3")
@@ -418,7 +411,7 @@ def main():
     print(f"\nFetching results for {total_rolls} students...")
     for i, roll_no in enumerate(roll_numbers, 1):
         print(f"Processing {roll_no} ({i}/{total_rolls})...")
-        result = get_student_results(roll_no, selected_sems)
+        result = get_student_results(roll_no, selected_sems, fetch_sgpa)
         if result and isinstance(result, dict) and 'detailed' in result and 'simple' in result:
             detailed_results.append(result['detailed'])
             simple_results.append(result['simple'])

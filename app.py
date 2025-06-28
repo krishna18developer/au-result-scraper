@@ -99,46 +99,116 @@ def generate_roll_numbers(patterns, include_detained=False, include_lateral=Fals
     
     return valid_rolls
 
-def determine_student_status(data):
-    """Determine if a student is regular, detained, or lateral entry"""
-    roll_no = data["student"]["rollNo"]
-    batch_year = "20" + roll_no[:2]
-    current_year = 2024
+# def determine_student_status(data):
+#     """Determine if a student is regular, detained, or lateral entry"""
+#     roll_no = data["student"]["rollNo"]
+#     batch_year = "20" + roll_no[:2]
+#     current_year = 2024
     
-    # Check if lateral entry
-    if "509" in roll_no or "512" in roll_no:
-        return "Lateral"
+#     # Check if lateral entry
+#     if "509" in roll_no or "512" in roll_no:
+#         return "Lateral"
         
-    # Get all exam attempts chronologically
-    all_attempts = []
-    for sem in data["results"]:
-        for subject in sem["subjectsResults"]:
-            for grade in subject["subjectGrades"]:
-                all_attempts.append({
-                    'sem': sem["semNo"],
-                    'date': grade["monthYear"],
-                    'passed': grade["passed"]
-                })
+#     # Get all exam attempts chronologically
+#     all_attempts = []
+#     for sem in data["results"]:
+#         for subject in sem["subjectsResults"]:
+#             for grade in subject["subjectGrades"]:
+#                 all_attempts.append({
+#                     'sem': sem["semNo"],
+#                     'date': grade["monthYear"],
+#                     'passed': grade["passed"]
+#                 })
     
-    # Sort attempts by date
-    all_attempts.sort(key=lambda x: x['date'])
+#     # Sort attempts by date
+#     all_attempts.sort(key=lambda x: x['date'])
     
-    # Check for out-of-sequence attempts or multiple attempts in same subject
-    expected_year = int(batch_year)
-    for attempt in all_attempts:
-        attempt_year = int(attempt['date'].split()[-1])
-        if attempt_year - expected_year > 2:  # More than expected gap
-            return "Rejoin"
+#     # Check for out-of-sequence attempts or multiple attempts in same subject
+#     expected_year = int(batch_year)
+#     for attempt in all_attempts:
+#         attempt_year = int(attempt['date'].split()[-1])
+#         if attempt_year - expected_year > 2:  # More than expected gap
+#             return "Rejoin"
             
-    # If student is from 2022 batch and still has first/second year subjects in 2024
-    if batch_year == "2022" and current_year == 2024:
-        for attempt in all_attempts:
-            if attempt['date'].endswith("2024") and attempt['sem'] <= 2:
-                return "Rejoin"
+#     # If student is from 2022 batch and still has first/second year subjects in 2024
+#     if batch_year == "2022" and current_year == 2024:
+#         for attempt in all_attempts:
+#             if attempt['date'].endswith("2024") and attempt['sem'] <= 2:
+#                 return "Rejoin"
     
-    return "Regular"
+#     return "Regular"
+# def determine_student_status(data, joined_year: int):
+#     """
+#     Determine student entry type:
+#     - 'Lateral' if earliest semester >= 3
+#     - 'Rejoin' if early semesters show up in much later years or repeated attempts
+#     - 'Regular' otherwise
+#     """
+#     roll_no = data["student"]["rollNo"]
+#     results = data.get("results", [])
+    
+#     # Gather all attempts
+#     all_attempts = []
+#     for sem in results:
+#         sem_no = sem.get("semNo", 0)
+#         for subject in sem.get("subjectsResults", []):
+#             for grade in subject.get("subjectGrades", []):
+#                 month_year = grade.get("monthYear", "")
+#                 year = int(month_year.split()[-1]) if month_year else 0
+#                 all_attempts.append({
+#                     'sem': sem_no,
+#                     'year': year,
+#                     'passed': grade.get("passed", True)
+#                 })
 
-def get_student_results(roll_no, selected_sems, fetch_sgpa):
+#     if not all_attempts:
+#         return "Regular"  # fallback
+
+#     # Sort by date
+#     all_attempts.sort(key=lambda x: x['year'])
+
+#     # 1. Check for Lateral Entry — if first attempt is for sem >= 3
+#     if all_attempts[0]['sem'] >= 3:
+#         return "Lateral"
+
+#     # 2. Check for Rejoin — if low semester shows up too late (e.g., joined 2022, sem 1 in 2024)
+#     for attempt in all_attempts:
+#         if attempt['sem'] <= 2 and attempt['year'] - joined_year > 2:
+#             return "Rejoin"
+
+#     # 3. Check for repeated semesters (sem 1 or 2 appears in multiple years)
+#     seen_sem_years = set()
+#     for attempt in all_attempts:
+#         key = (attempt['sem'], attempt['year'])
+#         if key in seen_sem_years:
+#             return "Rejoin"
+#         seen_sem_years.add(key)
+
+#     return "Regular"
+
+# Simple Patch For Now
+def determine_student_status(data, joined_year: int):
+    """
+    Determine student entry type:
+    - 'Lateral' if earliest semester >= 3
+    - 'Rejoin' if early semesters show up in much later years or repeated attempts
+    - 'Regular' otherwise
+    """
+    # Sample Joined Year = 22
+    roll_no = data["student"]["rollNo"]
+    
+    # Get First Two Digits of Roll Number
+    roll_prefix = roll_no[:2]
+    if roll_prefix == str(joined_year):
+        return "Regular"
+    elif roll_prefix == str(int(joined_year) + 1):
+        return "Lateral"
+    elif roll_prefix == str(int(joined_year) - 1):
+        return "Rejoin"
+
+
+
+def get_student_results(roll_no, selected_sems,year_suffix, fetch_sgpa):
     """Fetch results for a single student"""
     url = "https://api.campx.in/exams/student-results/external"
     
@@ -173,25 +243,25 @@ def get_student_results(roll_no, selected_sems, fetch_sgpa):
         
         response = session.get(url, params=params, headers=headers)
         
+        
         if response.status_code == 422:
             print(f"Error fetching results for {roll_no}: {response.text}")
             return None
             
         response.raise_for_status()
         data = response.json()
-        
+        # print(data)
         # Check if student has all requested semesters
         available_sems = {sem["semNo"] for sem in data["results"]}
         missing_sems = set(selected_sems) - available_sems
         if missing_sems:
-            print(f"Skipping {roll_no}: Missing semesters {missing_sems}")
-            return None
+            print(f"Skipping missing semesters {missing_sems} for {roll_no}")
         
         student_info = data["student"]
         student_name = student_info["fullName"]
         
         # Determine student status
-        status = determine_student_status(data)
+        status =  determine_student_status(data, joined_year=int(year_suffix))
         
         # Add batch year from roll number
         batch_year = "20" + roll_no[:2]
@@ -411,7 +481,7 @@ def main():
     print(f"\nFetching results for {total_rolls} students...")
     for i, roll_no in enumerate(roll_numbers, 1):
         print(f"Processing {roll_no} ({i}/{total_rolls})...")
-        result = get_student_results(roll_no, selected_sems, fetch_sgpa)
+        result = get_student_results(roll_no, selected_sems, year_suffix ,fetch_sgpa)
         if result and isinstance(result, dict) and 'detailed' in result and 'simple' in result:
             detailed_results.append(result['detailed'])
             simple_results.append(result['simple'])
@@ -429,8 +499,8 @@ def main():
 
         sem_str = '-'.join(map(str, selected_sems))
         base_filename = f"{section}_sem{sem_str}"
-        detailed_filepath = os.path.join('data', f"{base_filename}_detailed.csv")
-        simple_filepath = os.path.join('data', f"{base_filename}_simple.csv")
+        detailed_filepath = os.path.join('data', f"{year_suffix}{base_filename}_detailed.csv")
+        simple_filepath = os.path.join('data', f"{year_suffix}{base_filename}_simple.csv")
         df_detailed.to_csv(detailed_filepath, index=False)
         df_simple.to_csv(simple_filepath, index=False)
 
